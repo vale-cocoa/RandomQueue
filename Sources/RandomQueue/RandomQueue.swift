@@ -26,24 +26,21 @@ import Queue
 public struct RandomQueue<Element> {
     private(set) var storage: CircularBuffer<Element>? = nil
     
-    private var _nextToDequeue: Int? = nil
-    
     public init() { }
     
     public init<S>(_ elements: S) where S : Sequence, Element == S.Iterator.Element {
         if let other = elements as? RandomQueue {
             self.storage = other.storage
         } else {
-            self.storage = CircularBuffer(elements: elements)
+            self.storage = CircularBuffer(elements: elements.shuffled())
         }
-        _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+        _checkForEmptyAtEndOfMutation()
     }
     
     public init(repeating repeatedValue: Element, count: Int) {
         guard count > 0 else { return }
         
         self.storage = CircularBuffer(repeating: repeatedValue, count: count)
-        _prepareNextRandomElement()
     }
     
 }
@@ -60,21 +57,12 @@ extension RandomQueue: Queue {
     }
     
     public func peek() -> Element? {
-        guard let idx = _nextToDequeue else { return nil }
-        
-        return storage![idx]
+        first
     }
     
     @discardableResult
     public mutating func dequeue() -> Element? {
-        _makeUnique()
-        guard let idx = _nextToDequeue else { return nil }
-        
-        defer {
-            _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
-        }
-        
-        return storage!.popFirstSwappedWithElement(at: idx)
+        popFirst()
     }
     
     public mutating func enqueue(_ newElement: Element) {
@@ -85,7 +73,7 @@ extension RandomQueue: Queue {
     }
     
     public mutating func enqueue<S>(contentsOf newElements: S) where S : Sequence, Element == S.Iterator.Element {
-        append(contentsOf: newElements)
+        append(contentsOf: newElements.shuffled())
     }
     
 }
@@ -97,7 +85,7 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
     
     public typealias Iterator = IndexingIterator<RandomQueue<Element>>
     
-    public typealias SubSequence = RandomQueueSlice<Element>
+    public typealias SubSequence = Slice<RandomQueue<Element>>
     
     public var startIndex: Int { 0 }
     
@@ -190,7 +178,7 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
         // Put back in place the RandomQueue
         defer {
             (work, self) = (self, work)
-            _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+            _checkForEmptyAtEndOfMutation()
         }
         
         // Invoke body taking advantage of CircularBuffer's
@@ -284,7 +272,7 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
         let additionalCapacity = _additionalCapacityNeeded(forReservingCapacity: difference)
         _makeUnique(additionalCapacity: additionalCapacity)
         storage!.replace(subrange: subrange, with: newElements)
-        _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+        _checkForEmptyAtEndOfMutation()
     }
     
     public mutating func reserveCapacity(_ n: Int) {
@@ -295,33 +283,31 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
     public mutating func append(_ newElement: Self.Element) {
         _makeUnique()
         storage!.append(newElement)
-        _prepareNextRandomElement()
     }
     
     public mutating func append<S>(contentsOf newElements: S) where S : Sequence, Self.Element == S.Iterator.Element {
         let additionalCapacity = _additionalCapacityNeeded(forReservingCapacity: newElements.underestimatedCount)
         _makeUnique(additionalCapacity: additionalCapacity)
         storage!.append(contentsOf: newElements)
-        _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+        _checkForEmptyAtEndOfMutation()
     }
     
     public mutating func insert(_ newElement: Self.Element, at i: Self.Index) {
         _makeUnique()
         storage!.insertAt(index: i, contentsOf: CollectionOfOne(newElement))
-        _prepareNextRandomElement()
     }
     
     public mutating func insert<C: Collection>(contentsOf newElements: C, at i: Self.Index) where  Self.Element == C.Element {
         let additionalCapacity = _additionalCapacityNeeded(forReservingCapacity: newElements.underestimatedCount)
         _makeUnique(additionalCapacity: additionalCapacity)
         storage!.insertAt(index: i, contentsOf: newElements)
-        _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+        _checkForEmptyAtEndOfMutation()
     }
     
     public mutating func remove(at i: Self.Index) -> Self.Element {
         _makeUnique()
         defer {
-            _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+            _checkForEmptyAtEndOfMutation()
         }
         
         return storage!.removeAt(index: i, count: 1, keepCapacity: false).first!
@@ -333,13 +319,13 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
         
         _makeUnique()
         storage!.removeAt(index: subrange.lowerBound, count: subrange.count)
-        _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+        _checkForEmptyAtEndOfMutation()
     }
     
     public mutating func removeFirst() -> Self.Element {
         _makeUnique()
         defer {
-            _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+            _checkForEmptyAtEndOfMutation()
         }
         
         return storage!.removeFirst(1, keepCapacity: false).first!
@@ -348,7 +334,7 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
     public mutating func removeFirst(_ k: Int) {
         _makeUnique()
         storage!.removeFirst(k, keepCapacity: false)
-        _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+        _checkForEmptyAtEndOfMutation()
     }
     
     @available(*, deprecated, renamed: "removeAll(keepingCapacity:)")
@@ -362,20 +348,18 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
         _makeUnique()
         guard keepCapacity else {
             storage = nil
-            _nextToDequeue = nil
             
             return
         }
         
         storage!.removeAll(keepCapacity: keepCapacity)
-        _nextToDequeue = nil
     }
     
     @discardableResult
     public mutating func popLast() -> Element? {
         _makeUnique()
         defer {
-            _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+            _checkForEmptyAtEndOfMutation()
         }
         
         return storage!.popLast()
@@ -385,7 +369,7 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
     public mutating func popFirst() -> Element? {
         _makeUnique()
         defer {
-            _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+            _checkForEmptyAtEndOfMutation()
         }
         
         return storage!.popFirst()
@@ -394,7 +378,7 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
     public mutating func removeLast() -> Self.Element {
         _makeUnique()
         defer {
-            _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+            _checkForEmptyAtEndOfMutation()
         }
         
         return storage!.removeLast(1).first!
@@ -404,7 +388,7 @@ extension RandomQueue: MutableCollection, BidirectionalCollection, RandomAccessC
         _makeUnique()
         
         storage!.removeLast(k)
-        _checkForEmptyAndPrepareNextRandomAtEndOfMutation()
+        _checkForEmptyAtEndOfMutation()
     }
     
 }
@@ -414,8 +398,7 @@ extension RandomQueue: ExpressibleByArrayLiteral {
     public init(arrayLiteral elements: Element...) {
         guard !elements.isEmpty else { return }
         
-        self.storage = CircularBuffer(elements: elements)
-        _prepareNextRandomElement()
+        self.storage = CircularBuffer(elements: elements.shuffled())
     }
     
 }
@@ -465,7 +448,6 @@ extension RandomQueue: Codable where Element: Codable {
         guard !elements.isEmpty else { return }
         
         self.storage = CircularBuffer(elements: elements)
-        _prepareNextRandomElement()
     }
     
 }
@@ -519,16 +501,23 @@ extension RandomQueue {
         }
     }
     
-    private mutating func _checkForEmptyAndPrepareNextRandomAtEndOfMutation() {
+    @inline(__always)
+    private mutating func _checkForEmptyAtEndOfMutation() {
         if self.storage?.count == 0 {
             self.storage = nil
         }
-        _prepareNextRandomElement()
     }
     
     @inline(__always)
     private mutating func _prepareNextRandomElement() {
-        _nextToDequeue = indices.randomElement()
+        guard
+            let randomIdx = indices.randomElement(),
+            randomIdx != 0
+        else { return }
+        
+        let temp = self.storage![0]
+        self.storage![0] = self.storage![randomIdx]
+        self.storage![randomIdx] = temp
     }
     
     @inline(__always)

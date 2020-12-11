@@ -2,7 +2,7 @@
 //  RandomQueueTests.swift
 //  RandomQueueTests
 //
-//  Created by Valeriano Della Longa on 30/11/2020.
+//  Created by Valeriano Della Longa on 2020/11/30.
 //  Copyright © 2020 Valeriano Della Longa. All rights reserved.
 //
 //  Permission to use, copy, modify, and/or distribute this software for any
@@ -65,26 +65,28 @@ final class RandomQueueTests: XCTestCase {
         
         // when sequence implements withContiguousStorageIfAvailable(_:)
         sut = RandomQueue(elements)
-        XCTAssertTrue(sut.elementsEqual(elements))
+        XCTAssertNotNil(sut)
+        XCTAssertTrue(sut.sorted().elementsEqual(elements))
         
         // when sequence doesn't implement withContiguousStorageIfAvailable(_:)
         sut = RandomQueue(AnySequence(elements))
-        XCTAssertTrue(sut.elementsEqual(elements))
+        XCTAssertTrue(sut.sorted().elementsEqual(elements))
         
         // when sequence's underestimated is less than its elements count:
         XCTAssertLessThan(sequence.underestimatedCount, elements.count)
         sut = RandomQueue(sequence)
-        XCTAssertTrue(sut.elementsEqual(elements))
+        XCTAssertTrue(sut.sorted().elementsEqual(elements))
     }
     
     func testInitFromArrayLiteral() {
-        sut = [1, 2, 3, 4, 5]
-        XCTAssertNotNil(sut)
-        XCTAssertEqual(Array(sut), [1, 2, 3, 4, 5])
-        
         sut = []
         XCTAssertNotNil(sut)
         XCTAssertTrue(sut.isEmpty)
+        
+        let elements = [1, 2, 3, 4, 5]
+        sut = [1, 2, 3, 4, 5]
+        XCTAssertNotNil(sut)
+        XCTAssertTrue(sut.sorted().elementsEqual(elements))
     }
     
     func testInitRepeatingCount() {
@@ -134,7 +136,7 @@ final class RandomQueueTests: XCTestCase {
         XCTAssertEqual(sut.first, sut.last)
         
         sut = RandomQueue([1, 2, 3])
-        XCTAssertEqual(sut.first, 1)
+        XCTAssertEqual(sut.first, sut.storage?.first)
         XCTAssertGreaterThan(sut.count, 1)
         XCTAssertNotEqual(sut.first, sut.last)
     }
@@ -151,7 +153,7 @@ final class RandomQueueTests: XCTestCase {
         XCTAssertEqual(sut.first, sut.last)
         
         sut = RandomQueue([1, 2, 3])
-        XCTAssertEqual(sut.last, 3)
+        XCTAssertEqual(sut.last, sut.storage?.last)
         XCTAssertGreaterThan(sut.count, 1)
         XCTAssertNotEqual(sut.first, sut.last)
     }
@@ -308,7 +310,7 @@ final class RandomQueueTests: XCTestCase {
         XCTAssertEqual(sut[0], sut.first)
         XCTAssertEqual(sut[sut.count - 1], sut.last)
         for idx in 0..<sut.count {
-            let expectedValue = idx + 1
+            let expectedValue = sut.storage![idx]
             XCTAssertEqual(sut[idx], expectedValue)
             
             sut[idx] = expectedValue + 10
@@ -377,7 +379,7 @@ final class RandomQueueTests: XCTestCase {
         XCTAssertNil(sut.storage)
         
         sut = [1, 2, 3, 4, 5]
-        let expectedResult1 = [10, 20, 30, 40, 50]
+        let expectedResult1 = sut.map { $0 * 10 }
         let exp2 = expectation(description: "closure completes")
         let result2: Bool? = sut.withContiguousMutableStorageIfAvailable { buff in
             for i in buff.startIndex..<buff.endIndex {
@@ -402,6 +404,28 @@ final class RandomQueueTests: XCTestCase {
         }
         wait(for: [exp3], timeout: 1)
         assertValueSemantics(copy)
+        
+        // Slice implementation works too:
+        sut = RandomQueue(1...10)
+        var slice = sut[1...3]
+        var sliceBuffElements: Array<Int>!
+        let exp4 = expectation(description: "closure completes")
+        let result4 = slice.withContiguousMutableStorageIfAvailable { buff -> Bool in
+            defer { exp4.fulfill() }
+            sliceBuffElements = []
+            for i in buff.startIndex..<buff.endIndex {
+                buff[i] *= 10
+                sliceBuffElements.append(buff[i])
+            }
+            
+            return true
+        }
+        wait(for: [exp4], timeout: 0.1)
+        XCTAssertNotNil(result4)
+        XCTAssertEqual(sliceBuffElements, Array(slice))
+        
+        // value semantics on Slice:
+        XCTAssertNotEqual(sut, slice.base)
     }
     
     func testWithContiguousStorageIfAvailable() {
@@ -432,6 +456,21 @@ final class RandomQueueTests: XCTestCase {
         wait(for: [exp2], timeout: 1)
         XCTAssertNotNil(result2)
         XCTAssertEqual(copiedValues, Array(sut[rangeToPick]))
+        
+        // Slice implementation works too:
+        sut = RandomQueue(1...10)
+        let slice = sut[1...3]
+        var sliceBuffElements: Array<Int>!
+        let exp4 = expectation(description: "closure completes")
+        let result3 = slice.withContiguousStorageIfAvailable { buff -> Bool in
+            defer { exp4.fulfill() }
+            sliceBuffElements = Array(buff)
+            
+            return true
+        }
+        wait(for: [exp4], timeout: 0.1)
+        XCTAssertNotNil(result3)
+        XCTAssertEqual(sliceBuffElements, Array(slice))
     }
     
     // MARK: - Functional Programming methods
@@ -459,7 +498,14 @@ final class RandomQueueTests: XCTestCase {
         sut = [1, 2, 3, 4, 5]
         result = []
         sut.forEach { result.append($0 * 10) }
-        XCTAssertEqual(result, [10, 20, 30, 40 ,50])
+        
+        var expectedResult = [Int]()
+        sut.storage?.forEach { expectedResult.append($0 * 10) }
+        
+        XCTAssertEqual(result, expectedResult)
+        
+        let throwingBody: (Int) throws -> Void = { _ in throw testThrownError }
+        XCTAssertThrowsError(try sut.forEach(throwingBody))
     }
     
     func testFilter() {
@@ -470,8 +516,9 @@ final class RandomQueueTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
         
         sut = [1, 2, 3, 4, 5]
+        let sutContainedElements = Array(sut)
         result = sut.filter { $0 % 2 == 0 }
-        XCTAssertEqual(result, [2, 4])
+        XCTAssertEqual(result, sutContainedElements.filter { $0 % 2 == 0 })
         
         let throwingPred: (Int) throws -> Bool = { _ in
             throw testThrownError
@@ -486,9 +533,12 @@ final class RandomQueueTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
         
         sut = [1, 2, 3, 4, 5]
+        var expectedResult = [String]()
+        sut.forEach { expectedResult.append(String($0)) }
+        
         result = sut.map { String($0) }
         XCTAssertEqual(result.count, sut.count)
-        XCTAssertEqual(result, ["1", "2", "3", "4", "5"])
+        XCTAssertEqual(result, expectedResult)
         
         let throwingTransform: (Int) throws -> String = { _ in
             throw testThrownError
@@ -522,13 +572,17 @@ final class RandomQueueTests: XCTestCase {
     }
     
     func testCompactMap() {
+        let transform: (Int) -> Int? = { return $0 % 2 == 0 ? $0 : nil }
         XCTAssertTrue(sut.isEmpty)
-        var result: [Int] = sut.compactMap { return $0 % 2 == 0 ? $0 : nil }
+        var result: [Int] = sut.compactMap(transform)
         XCTAssertTrue(result.isEmpty)
         
         sut = [1, 2, 3, 4, 5]
+        let sutContainedElements = sut.map { $0 }
+        let expectedResult = sutContainedElements?.compactMap(transform)
+        
         result = sut.compactMap { return $0 % 2 == 0 ? $0 : nil }
-        XCTAssertEqual(result, [2, 4])
+        XCTAssertEqual(result, expectedResult)
         
         let throwingTransform: (Int) throws -> Int? = { _ in
             throw testThrownError
@@ -591,40 +645,7 @@ final class RandomQueueTests: XCTestCase {
     func testReplaceSubrange() {
         // main functionalities guaranteed by CircularBuffer method
         // replace(subrange:with:)
-        // We just do a few basic tests here:
-        sut = [1, 2, 3, 4, 5]
-        sut.replaceSubrange(1...3, with: [20, 30, 40])
-        XCTAssertEqual(Array(sut), [1, 20, 30, 40, 5])
-        
-        sut = [1, 2, 3, 4, 5]
-        sut.replaceSubrange(sut.startIndex..<sut.startIndex, with: [10, 20, 30, 40, 50])
-        XCTAssertEqual(Array(sut), [10, 20, 30, 40, 50, 1, 2, 3, 4, 5])
-        
-        sut.replaceSubrange(sut.endIndex..<sut.endIndex, with: [60, 70, 80, 90, 100])
-        XCTAssertEqual(Array(sut), [10, 20, 30, 40, 50, 1, 2, 3, 4, 5, 60, 70, 80, 90, 100])
-        
-        sut.replaceSubrange(5..<10, with: [0])
-        XCTAssertEqual(Array(sut), [10, 20, 30, 40, 50, 0, 60, 70, 80, 90, 100])
-        
-        sut.replaceSubrange(5..<6, with: [])
-        XCTAssertEqual(Array(sut), [10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
-        
-        // When the storage is nil and nothing gets added by the
-        // replace, then storage is nil still:
-        sut = RandomQueue<Int>()
-        XCTAssertNil(sut.storage)
-        sut.replaceSubrange(0..<0, with: [])
-        XCTAssertNil(sut.storage)
-        
-        // when storage is not nil, and replace erases all elements,
-        // then storage becomes nil:
-        sut = [1, 2, 3, 4, 5]
-        XCTAssertNotNil(sut.storage)
-        sut.replaceSubrange(sut.startIndex..<sut.endIndex, with: [])
-        XCTAssertTrue(sut.isEmpty)
-        XCTAssertNil(sut.storage)
-        
-        // value semantics:
+        // Let's test for value semantics:
         sut = [1, 2, 3, 4, 5]
         var copy = sut!
         copy.replaceSubrange(copy.startIndex..., with: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
@@ -715,10 +736,11 @@ final class RandomQueueTests: XCTestCase {
     func testRemoveFirstElement() {
         let elements = [1, 2, 3]
         sut = RandomQueue(elements)
+        let sutContainedElements = sut!.map { $0 }
         
-        XCTAssertEqual(sut.removeFirst(), elements.first)
+        XCTAssertEqual(sut.removeFirst(), sutContainedElements.first)
         XCTAssertEqual(sut.count, elements.count - 1)
-        XCTAssertEqual(Array(sut), Array(elements.dropFirst()))
+        XCTAssertEqual(Array(sut), Array(sutContainedElements.dropFirst()))
         
         sut = [1]
         let _ = sut.removeFirst()
@@ -797,10 +819,11 @@ final class RandomQueueTests: XCTestCase {
     func testRemoveLastElement() {
         let elements = [1, 2, 3]
         sut = RandomQueue(elements)
+        let sutContainedElements = sut!.map { $0 }
         
-        XCTAssertEqual(sut.removeLast(), elements.last)
+        XCTAssertEqual(sut.removeLast(), sutContainedElements.last)
         XCTAssertEqual(sut.count, elements.count - 1)
-        XCTAssertEqual(Array(sut), Array(elements.dropLast()))
+        XCTAssertEqual(Array(sut), Array(sutContainedElements.dropLast()))
         
         sut = [1]
         let _ = sut.removeLast()
@@ -837,26 +860,26 @@ final class RandomQueueTests: XCTestCase {
         sut = [1, 2, 3, 4, 5]
         XCTAssertNotEqual(sut, RandomQueue<Int>())
         
-        let copy = sut!
+        var copy = sut!
         XCTAssertTrue(sut.storage === copy.storage)
         XCTAssertEqual(sut, copy)
         
-        let other: RandomQueue<Int> = [1, 2, 3, 4, 5, 6]
-        XCTAssertNotEqual(sut.count, other.count)
-        XCTAssertNotEqual(sut, other)
+        copy.append(6)
+        XCTAssertNotEqual(sut.count, copy.count)
+        XCTAssertNotEqual(sut, copy)
         
         sut.append(6)
-        XCTAssertEqual(sut.count, other.count)
-        XCTAssertEqual(sut, other)
+        XCTAssertEqual(sut.count, copy.count)
+        XCTAssertEqual(sut, copy)
         for idx in 0..<sut.count {
-            XCTAssertEqual(sut[idx], other[idx])
+            XCTAssertEqual(sut[idx], copy[idx])
         }
         
         sut[sut.endIndex - 1] = 10
-        XCTAssertEqual(sut.count, other.count)
-        XCTAssertNotEqual(sut, other)
+        XCTAssertEqual(sut.count, copy.count)
+        XCTAssertNotEqual(sut, copy)
         var indexesWhereDifferent = [Int]()
-        for idx in 0..<sut.count where sut[idx] != other[idx] {
+        for idx in 0..<sut.count where sut[idx] != copy[idx] {
             indexesWhereDifferent.append(idx)
         }
         XCTAssertFalse(indexesWhereDifferent.isEmpty)
@@ -907,112 +930,17 @@ final class RandomQueueTests: XCTestCase {
     // MARK: - Custom(Debug)StringConvertible conformance tests
     func testDescription() {
         sut = [1, 2, 3, 4, 5]
-        XCTAssertEqual(sut.description, "RandomQueue[1, 2, 3, 4, 5]")
+        let elementsDescription = Array(sut).description
+        XCTAssertEqual(sut.description, "RandomQueue" + elementsDescription)
     }
     
     func testDebugDescription() {
         sut = [1, 2, 3, 4, 5]
-        XCTAssertEqual(sut.debugDescription, "Optional(RandomQueue.RandomQueue<Swift.Int>([1, 2, 3, 4, 5]))")
+        let elementsDescription = Array(sut).description
+        XCTAssertEqual(sut.debugDescription, "Optional(RandomQueue.RandomQueue<Swift.Int>(\(elementsDescription)))")
     }
     
-    // MARK: - Performance tests
-    func testRandomQueuePerformanceAtSmallCount() {
-        measure(performanceLoopRandomQueueSmallCount)
-    }
-    
-    func testArrayPerformanceAtSmallCount() {
-        measure(performanceLoopArraySmallCount)
-    }
-    
-    func testRandomQueuePreformanceAtLargeCount() {
-        measure(performanceLoopRandomQueueLargeCount)
-    }
-    
-    func testArrayPerformanceAtLargeCount() {
-        measure(performanceLoopArrayLargeCount)
-    }
-    
-    // MARK: - Private helpers
-    private func performanceLoopRandomQueueSmallCount() {
-        let outerCount: Int = 10_000
-        let innerCount: Int = 20
-        var accumulator = 0
-        for _ in 1...outerCount {
-            var queue = RandomQueue<Int>()
-            queue.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                queue.enqueue(i)
-                accumulator ^= (i)
-            }
-            for _ in 1...innerCount {
-                accumulator ^= (queue.peek() ?? 0)
-                queue.dequeue()
-            }
-        }
-        XCTAssert(accumulator == 0)
-    }
-    
-    private func performanceLoopArraySmallCount() {
-        let outerCount: Int = 10_000
-        let innerCount: Int = 20
-        var accumulator = 0
-        for _ in 1...outerCount {
-            var array = Array<Int>()
-            array.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                array.append(i)
-                accumulator ^= (array.last ?? 0)
-            }
-            for _ in 1...innerCount {
-                if let randomIdx = array.indices.randomElement() {
-                    array.swapAt(array.endIndex - 1, randomIdx)
-                }
-                accumulator ^= (array.popLast() ?? 0)
-            }
-        }
-        XCTAssert(accumulator == 0)
-    }
-    
-    private func performanceLoopRandomQueueLargeCount() {
-        let outerCount: Int = 10
-        let innerCount: Int = 20_000
-        var accumulator = 0
-        for _ in 1...outerCount {
-            var queue = RandomQueue<Int>()
-            queue.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                queue.enqueue(i)
-                accumulator ^= (i)
-            }
-            for _ in 1...innerCount {
-                accumulator ^= (queue.peek() ?? 0)
-                queue.dequeue()
-            }
-        }
-        XCTAssert(accumulator == 0)
-    }
-    
-    private func performanceLoopArrayLargeCount() {
-        let outerCount: Int = 10
-        let innerCount: Int = 20_000
-        var accumulator = 0
-        for _ in 1...outerCount {
-            var array = Array<Int>()
-            array.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                array.append(i)
-                accumulator ^= (array.last ?? 0)
-            }
-            for _ in 1...innerCount {
-                if let randomIdx = array.indices.randomElement() {
-                    array.swapAt(array.endIndex - 1, randomIdx)
-                }
-                accumulator ^= (array.popLast() ?? 0)
-            }
-        }
-        XCTAssert(accumulator == 0)
-    }
-    
+    // MARK: - Helpers
     func assertValueSemantics(_ copy: RandomQueue<Int>, file: StaticString = #file, line: UInt = #line) {
         assertAreDifferentValuesAndHaveDifferentStorage(lhs: sut, rhs: copy, file: file, line: line)
     }
