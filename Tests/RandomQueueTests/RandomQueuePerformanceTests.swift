@@ -22,102 +22,111 @@ import XCTest
 import RandomQueue
 
 final class RandomQueuePerformanceTests: XCTestCase {
-    // MARK: - Performance tests
+    var sut: (outerCount: Int, innerCount: Int)!
+    
     func testRandomQueuePerformanceAtSmallCount() {
-        measure(performanceLoopRandomQueueSmallCount)
+        whenSmallCount()
+        measure { performanceLoop(for: .randomQueue) }
     }
     
     func testArrayPerformanceAtSmallCount() {
-        measure(performanceLoopArraySmallCount)
+        whenSmallCount()
+        measure { performanceLoop(for: .arrayBased) }
     }
     
     func testRandomQueuePreformanceAtLargeCount() {
-        measure(performanceLoopRandomQueueLargeCount)
+        whenLargeCount()
+        measure { performanceLoop(for: .randomQueue) }
+
     }
     
     func testArrayPerformanceAtLargeCount() {
-        measure(performanceLoopArrayLargeCount)
+        whenLargeCount()
+        measure { performanceLoop(for: .arrayBased) }
     }
     
     // MARK: - Private helpers
-    private func performanceLoopRandomQueueSmallCount() {
-        let outerCount: Int = 10_000
-        let innerCount: Int = 20
+    private func whenSmallCount() {
+        sut = (10_000, 20)
+    }
+    
+    private func whenLargeCount() {
+        sut = (10, 20_000)
+    }
+    
+    private func performanceLoop(for kind: KindOfTestable) {
         var accumulator = 0
-        for _ in 1...outerCount {
-            var queue = RandomQueue<Int>()
-            queue.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                queue.enqueue(i)
-                accumulator ^= (i)
+        for _ in 1...sut.outerCount {
+            var testable = kind.newTestable(capacity: sut.innerCount)
+            for i in 1...sut.innerCount {
+                testable.enqueue(i)
+                accumulator ^= i
             }
-            for _ in 1...innerCount {
-                accumulator ^= (queue.peek() ?? 0)
-                queue.dequeue()
+            for _ in 1...sut.innerCount {
+                accumulator ^= (testable.dequeue() ?? 0)
             }
         }
         XCTAssert(accumulator == 0)
     }
     
-    private func performanceLoopArraySmallCount() {
-        let outerCount: Int = 10_000
-        let innerCount: Int = 20
-        var accumulator = 0
-        for _ in 1...outerCount {
-            var array = Array<Int>()
-            array.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                array.append(i)
-                accumulator ^= (array.last ?? 0)
-            }
-            for _ in 1...innerCount {
-                if let randomIdx = array.indices.randomElement() {
-                    array.swapAt(array.endIndex - 1, randomIdx)
-                }
-                accumulator ^= (array.popLast() ?? 0)
+    private enum KindOfTestable {
+        case randomQueue
+        case arrayBased
+        
+        func newTestable(capacity: Int) -> PerformanceTestable {
+            switch self {
+            case .randomQueue:
+                return RandomQueue<Int>(capacity: capacity)
+            case .arrayBased:
+                return Array<Int>(capacity: capacity)
             }
         }
-        XCTAssert(accumulator == 0)
     }
     
-    private func performanceLoopRandomQueueLargeCount() {
-        let outerCount: Int = 10
-        let innerCount: Int = 20_000
-        var accumulator = 0
-        for _ in 1...outerCount {
-            var queue = RandomQueue<Int>()
-            queue.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                queue.enqueue(i)
-                accumulator ^= (i)
-            }
-            for _ in 1...innerCount {
-                accumulator ^= (queue.peek() ?? 0)
-                queue.dequeue()
-            }
-        }
-        XCTAssert(accumulator == 0)
+}
+
+fileprivate protocol PerformanceTestable {
+    init(capacity: Int)
+    
+    var first: Int? { get }
+    
+    var last: Int? { get }
+    
+    mutating func enqueue(_ newElement: Int)
+    
+    @discardableResult
+    mutating func dequeue() -> Int?
+}
+
+extension RandomQueue: PerformanceTestable where Element == Int {
+    init(capacity: Int) {
+        self.init()
+        reserveCapacity(capacity)
     }
     
-    private func performanceLoopArrayLargeCount() {
-        let outerCount: Int = 10
-        let innerCount: Int = 20_000
-        var accumulator = 0
-        for _ in 1...outerCount {
-            var array = Array<Int>()
-            array.reserveCapacity(innerCount)
-            for i in 1...innerCount {
-                array.append(i)
-                accumulator ^= (array.last ?? 0)
-            }
-            for _ in 1...innerCount {
-                if let randomIdx = array.indices.randomElement() {
-                    array.swapAt(array.endIndex - 1, randomIdx)
-                }
-                accumulator ^= (array.popLast() ?? 0)
+}
+
+extension Array: PerformanceTestable where Element == Int {
+    init(capacity: Int) {
+        self.init()
+        reserveCapacity(capacity)
+    }
+    
+    mutating func enqueue(_ newElement: Int) {
+        append(newElement)
+        if let randomIdx = indices.randomElement() {
+            swapAt(endIndex - 1, randomIdx)
+        }
+    }
+    
+    mutating func dequeue() -> Int? {
+        defer {
+            if let randomIdx = indices.randomElement() {
+                swapAt(endIndex - 1, randomIdx)
             }
         }
-        XCTAssert(accumulator == 0)
+        
+        return popLast()
     }
     
 }

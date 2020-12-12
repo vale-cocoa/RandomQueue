@@ -14,7 +14,7 @@ let package = Package(
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         // .package(url: /* package url */, from: "1.0.0"),
-        .package(url: "https://github.com/vale-cocoa/CircularBuffer.git", from: "2.0.3"),
+        .package(url: "https://github.com/vale-cocoa/CircularBuffer.git", from: "2.1.2"),
         .package(url: "https://github.com/vale-cocoa/Queue.git", from: "1.0.1"),
     ],
     targets: [
